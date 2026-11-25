@@ -99,18 +99,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       },
     });
 
-    map.on('mousedown', (e) => console.warn('DEBUG mousedown', e.point));
-    map.on('mouseup', (e) => console.warn('DEBUG mouseup', e.point));
-    map.on('click', (e) => console.warn('DEBUG generic map click', e.point));
-
     map.on('click', 'clusters', (e) => {
-      console.warn('DEBUG cluster click fired, point=', e.point);
       const features = map.queryRenderedFeatures(e.point, { layers: ['clusters'] });
-      console.warn('DEBUG features found:', features.length);
       const clusterId = features[0].properties.cluster_id;
-      console.warn('DEBUG clusterId=', clusterId, typeof clusterId);
       map.getSource('restaurants').getClusterExpansionZoom(clusterId, (err, zoom) => {
-        console.warn('DEBUG getClusterExpansionZoom callback: err=', err, 'zoom=', zoom);
         if (err) return;
         map.easeTo({ center: features[0].geometry.coordinates, zoom });
       });
