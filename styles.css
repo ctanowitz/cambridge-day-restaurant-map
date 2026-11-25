@@ -124,6 +124,32 @@ html, body {
   max-width: 260px;
 }
 
+.popup-group-count {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.maplibregl-popup-content:has(.popup-group-entry) {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.popup-group-entry {
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid #e5e5e5;
+}
+
+.popup-group-entry:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
 .popup-name {
   font-weight: 600;
   font-size: 14px;
