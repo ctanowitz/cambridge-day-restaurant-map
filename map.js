@@ -36,7 +36,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     center: CAMBRIDGE_CENTER,
     zoom: 12.5,
   });
-  window.__map = map; // exposed for debugging/console access
 
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
 
@@ -100,12 +99,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       },
     });
 
-    map.on('click', (e) => {
-      console.warn('DEBUG map click at', e.point, map.queryRenderedFeatures(e.point).map(f => f.layer.id));
-    });
-
     map.on('click', 'clusters', (e) => {
-      console.warn('DEBUG clusters click fired');
       const features = map.queryRenderedFeatures(e.point, { layers: ['clusters'] });
       const clusterId = features[0].properties.cluster_id;
       map.getSource('restaurants').getClusterExpansionZoom(clusterId, (err, zoom) => {
