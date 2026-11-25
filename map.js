@@ -36,6 +36,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     center: CAMBRIDGE_CENTER,
     zoom: 12.5,
   });
+  window.__map = map; // exposed for debugging/console access
 
   map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
 
