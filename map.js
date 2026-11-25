@@ -100,7 +100,12 @@ document.addEventListener('DOMContentLoaded', async () => {
       },
     });
 
+    map.on('click', (e) => {
+      console.warn('DEBUG map click at', e.point, map.queryRenderedFeatures(e.point).map(f => f.layer.id));
+    });
+
     map.on('click', 'clusters', (e) => {
+      console.warn('DEBUG clusters click fired');
       const features = map.queryRenderedFeatures(e.point, { layers: ['clusters'] });
       const clusterId = features[0].properties.cluster_id;
       map.getSource('restaurants').getClusterExpansionZoom(clusterId, (err, zoom) => {
