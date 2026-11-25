@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Cambridge Day Restaurant Map</title>
+  <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h1>Cambridge Day Restaurants</h1>
+        <p class="subtitle">Every restaurant mentioned in Cambridge Day's Food + Drink coverage.</p>
+      </div>
+      <div class="filters">
+        <input id="search" type="text" placeholder="Search by name or cuisine&hellip;" autocomplete="off" />
+        <select id="cuisine-filter">
+          <option value="">All cuisines</option>
+        </select>
+      </div>
+      <div class="result-count" id="result-count"></div>
+      <ul class="story-list" id="story-list"></ul>
+    </aside>
+    <main class="map-container">
+      <div id="map"></div>
+    </main>
+  </div>
+
+  <script src="https://pym.nprapps.org/pym.v1.min.js"></script>
+  <script src="map.js"></script>
+</body>
+</html>
