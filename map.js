@@ -100,9 +100,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     map.on('click', 'clusters', (e) => {
+      console.warn('DEBUG cluster click fired, point=', e.point);
       const features = map.queryRenderedFeatures(e.point, { layers: ['clusters'] });
+      console.warn('DEBUG features found:', features.length);
       const clusterId = features[0].properties.cluster_id;
+      console.warn('DEBUG clusterId=', clusterId, typeof clusterId);
       map.getSource('restaurants').getClusterExpansionZoom(clusterId, (err, zoom) => {
+        console.warn('DEBUG getClusterExpansionZoom callback: err=', err, 'zoom=', zoom);
         if (err) return;
         map.easeTo({ center: features[0].geometry.coordinates, zoom });
       });
