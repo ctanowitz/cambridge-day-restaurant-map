@@ -45,6 +45,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     return feature ? feature.properties.NAME : null;
   }
 
+  // Bounding box of a Polygon/MultiPolygon geometry, for zooming to it.
+  function geometryBounds(geometry) {
+    let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
+    const visitRing = (ring) => {
+      for (const [lng, lat] of ring) {
+        if (lng < minLng) minLng = lng;
+        if (lng > maxLng) maxLng = lng;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      }
+    };
+    const polygons = geometry.type === 'MultiPolygon' ? geometry.coordinates : [geometry.coordinates];
+    for (const polygon of polygons) {
+      for (const ring of polygon) visitRing(ring);
+    }
+    return [[minLng, minLat], [maxLng, maxLat]];
+  }
+
   // The exported data has one row per (restaurant, article) mention -- the
   // same restaurant can appear many times across different articles written
   // over the years. Collapse those rows into one entity per restaurant
@@ -127,6 +145,28 @@ document.addEventListener('DOMContentLoaded', async () => {
   let popup = null;
 
   map.on('load', () => {
+    // Highlighting the selected neighborhood's boundary -- filter starts
+    // matching nothing (no neighborhood picked yet); applyFilters() below
+    // updates it to the chosen NAME.
+    map.addSource('neighborhoods', {
+      type: 'geojson',
+      data: { type: 'FeatureCollection', features: neighborhoodFeatures },
+    });
+    map.addLayer({
+      id: 'neighborhood-highlight-fill',
+      type: 'fill',
+      source: 'neighborhoods',
+      filter: ['==', ['get', 'NAME'], ''],
+      paint: { 'fill-color': '#efbe25', 'fill-opacity': 0.08 },
+    });
+    map.addLayer({
+      id: 'neighborhood-highlight-outline',
+      type: 'line',
+      source: 'neighborhoods',
+      filter: ['==', ['get', 'NAME'], ''],
+      paint: { 'line-color': '#9a6b00', 'line-width': 2 },
+    });
+
     map.addSource('restaurants', {
       type: 'geojson',
       data: toGeoJSON(allEntities),
@@ -323,8 +363,25 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (map.getSource('restaurants')) {
       map.getSource('restaurants').setData(toGeoJSON(filtered));
     }
+    highlightNeighborhood(neighborhood);
     renderList(filtered);
     pymChild.sendHeight();
+  }
+
+  // Outlines the chosen neighborhood and zooms to it; clearing the filter
+  // (empty value) removes the outline and returns to the full-city view.
+  function highlightNeighborhood(name) {
+    if (!map.getLayer('neighborhood-highlight-outline')) return;
+    const filterExpr = ['==', ['get', 'NAME'], name || ''];
+    map.setFilter('neighborhood-highlight-fill', filterExpr);
+    map.setFilter('neighborhood-highlight-outline', filterExpr);
+
+    if (name) {
+      const feature = neighborhoodFeatures.find(f => f.properties.NAME === name);
+      if (feature) map.fitBounds(geometryBounds(feature.geometry), { padding: 40 });
+    } else {
+      map.easeTo({ center: CAMBRIDGE_CENTER, zoom: 12.5 });
+    }
   }
 
   document.getElementById('search').addEventListener('input', debounce(applyFilters, 150));
