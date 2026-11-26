@@ -5,13 +5,40 @@ document.addEventListener('DOMContentLoaded', async () => {
   const CAMBRIDGE_CENTER = [-71.1097, 42.3736];
 
   const resp = await fetch('data/restaurants.json');
-  const allRestaurants = await resp.json();
+  const rawRows = await resp.json();
 
-  // Stable id per restaurant so popups/list selection can refer back to a feature.
-  allRestaurants.forEach((r, i) => { r._id = i; });
+  // The exported data has one row per (restaurant, article) mention -- the
+  // same restaurant can appear many times across different articles written
+  // over the years. Collapse those rows into one entity per restaurant
+  // (matched by name), each holding every article about it, newest first.
+  // NOTE: this matches by exact name text, so occasional inconsistent
+  // spellings of the same real restaurant across articles (e.g. "Chocho's"
+  // vs "Cho Cho's") won't be merged -- a data-cleaning problem, not a
+  // mapping one.
+  function buildRestaurantEntities(rows) {
+    const byName = new Map();
+    for (const r of rows) {
+      const key = r.name.trim().toLowerCase();
+      let entity = byName.get(key);
+      if (!entity) {
+        entity = { name: r.name, address: null, cuisine: null, lat: r.lat, lng: r.lng, articles: [] };
+        byName.set(key, entity);
+      }
+      if (!entity.address && r.address) entity.address = r.address;
+      if (!entity.cuisine && r.cuisine) entity.cuisine = r.cuisine;
+      entity.articles.push({ date: r.date, excerpt: r.excerpt, url: r.url });
+    }
+    for (const entity of byName.values()) {
+      entity.articles.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+    }
+    return [...byName.values()];
+  }
+
+  const allEntities = buildRestaurantEntities(rawRows);
+  allEntities.forEach((entity, i) => { entity._id = i; });
 
   const cuisineSelect = document.getElementById('cuisine-filter');
-  const cuisines = [...new Set(allRestaurants.map(r => r.cuisine).filter(Boolean))].sort();
+  const cuisines = [...new Set(allEntities.map(r => r.cuisine).filter(Boolean))].sort();
   for (const c of cuisines) {
     const opt = document.createElement('option');
     opt.value = c;
@@ -19,22 +46,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     cuisineSelect.appendChild(opt);
   }
 
-  // Many restaurants share an exact address (food courts, malls, multiple
-  // articles about the same place over time) -- 54% of distinct locations in
-  // this dataset have 2+ rows. Points at the identical coordinate can never
-  // be split apart by MapLibre's clustering no matter how far you zoom, so
-  // one "location" becomes one map feature, carrying every restaurant at
-  // that spot; `currentGroups` is the lookup from a feature's groupIndex
-  // back to its full list of restaurants (kept out of the GeoJSON itself,
-  // which only needs simple property values).
+  // Multiple distinct restaurants often share one exact address (food
+  // courts, malls) -- points at an identical coordinate can never be split
+  // apart by MapLibre's clustering no matter the zoom, so one "location"
+  // becomes one map feature, carrying every restaurant entity at that spot.
+  // `currentGroups` is the lookup from a feature's groupIndex back to its
+  // full list of restaurant entities (kept out of the GeoJSON itself, which
+  // only needs simple property values).
   let currentGroups = [];
 
-  function toGeoJSON(restaurants) {
+  function toGeoJSON(entities) {
     const byLocation = new Map();
-    for (const r of restaurants) {
-      const key = `${r.lat.toFixed(5)},${r.lng.toFixed(5)}`;
+    for (const entity of entities) {
+      const key = `${entity.lat.toFixed(5)},${entity.lng.toFixed(5)}`;
       if (!byLocation.has(key)) byLocation.set(key, []);
-      byLocation.get(key).push(r);
+      byLocation.get(key).push(entity);
     }
     currentGroups = [...byLocation.values()];
 
@@ -62,7 +88,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   map.on('load', () => {
     map.addSource('restaurants', {
       type: 'geojson',
-      data: toGeoJSON(allRestaurants),
+      data: toGeoJSON(allEntities),
       cluster: true,
       clusterMaxZoom: 15,
       clusterRadius: 45,
@@ -155,31 +181,38 @@ document.addEventListener('DOMContentLoaded', async () => {
     map.on('mouseenter', 'unclustered-point', () => { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', 'unclustered-point', () => { map.getCanvas().style.cursor = ''; });
 
-    renderList(allRestaurants);
+    renderList(allEntities);
     setTimeout(() => pymChild.sendHeight(), 300);
   });
 
-  function restaurantEntryHtml(r) {
+  function entityHtml(entity) {
+    const articlesHtml = entity.articles.map(a => `
+      <div class="popup-article">
+        ${a.date ? `<div class="popup-article-date">${escapeHtml(a.date)}</div>` : ''}
+        ${a.excerpt ? `<p class="popup-excerpt">${escapeHtml(a.excerpt)}</p>` : ''}
+        ${a.url ? `<a class="popup-link" href="${a.url}" target="_blank" rel="noopener">Read the article →</a>` : ''}
+      </div>
+    `).join('');
     return `
-      <div class="popup-name">${escapeHtml(r.name)}</div>
-      ${r.cuisine ? `<div class="popup-cuisine">${escapeHtml(r.cuisine)}</div>` : ''}
-      ${r.address ? `<div class="popup-address">${escapeHtml(r.address)}</div>` : ''}
-      ${r.excerpt ? `<p class="popup-excerpt">${escapeHtml(r.excerpt)}</p>` : ''}
-      ${r.url ? `<a class="popup-link" href="${r.url}" target="_blank" rel="noopener">Read the article →</a>` : ''}
+      <div class="popup-name">${escapeHtml(entity.name)}</div>
+      ${entity.cuisine ? `<div class="popup-cuisine">${escapeHtml(entity.cuisine)}</div>` : ''}
+      ${entity.address ? `<div class="popup-address">${escapeHtml(entity.address)}</div>` : ''}
+      ${entity.articles.length > 1 ? `<div class="popup-article-count">${entity.articles.length} articles, newest first</div>` : ''}
+      ${articlesHtml}
     `;
   }
 
-  // Shows every restaurant at one location in a single (scrollable, if
-  // several) popup -- see the `currentGroups` comment above for why a map
+  // Shows every distinct restaurant at one location in a single (scrollable,
+  // if several) popup -- see the `currentGroups` comment above for why a map
   // point can represent more than one restaurant.
   function showGroupPopup(group, coordinates) {
     if (popup) popup.remove();
     const el = document.createElement('div');
     if (group.length > 1) {
       el.innerHTML = `<div class="popup-group-count">${group.length} restaurants at this spot</div>` +
-        group.map(r => `<div class="popup-group-entry">${restaurantEntryHtml(r)}</div>`).join('');
+        group.map(entity => `<div class="popup-group-entry">${entityHtml(entity)}</div>`).join('');
     } else {
-      el.innerHTML = restaurantEntryHtml(group[0]);
+      el.innerHTML = entityHtml(group[0]);
     }
     popup = new maplibregl.Popup({ closeButton: true, maxWidth: '280px' })
       .setLngLat(coordinates)
@@ -193,37 +226,40 @@ document.addEventListener('DOMContentLoaded', async () => {
     }[c]));
   }
 
-  function renderList(restaurants) {
+  function renderList(entities) {
     const list = document.getElementById('story-list');
     const countEl = document.getElementById('result-count');
-    countEl.textContent = `${restaurants.length} restaurant${restaurants.length === 1 ? '' : 's'}`;
+    countEl.textContent = `${entities.length} restaurant${entities.length === 1 ? '' : 's'}`;
 
     list.innerHTML = '';
     const frag = document.createDocumentFragment();
     // Cap the rendered list for performance; the map always reflects the full filtered set.
-    const toRender = restaurants.slice(0, 300);
-    for (const r of toRender) {
+    const toRender = entities.slice(0, 300);
+    for (const entity of toRender) {
+      const newest = entity.articles[0];
       const li = document.createElement('li');
-      li.dataset.id = r._id;
+      li.dataset.id = entity._id;
+      const meta = [entity.cuisine, newest.date].filter(Boolean).join(' · ');
+      const articleCount = entity.articles.length > 1 ? ` · ${entity.articles.length} articles` : '';
       li.innerHTML = `
-        <p class="story-name">${escapeHtml(r.name)}</p>
-        <p class="story-meta">${[r.cuisine, r.date].filter(Boolean).join(' · ')}</p>
-        ${r.excerpt ? `<p class="story-excerpt">${escapeHtml(r.excerpt)}</p>` : ''}
+        <p class="story-name">${escapeHtml(entity.name)}</p>
+        <p class="story-meta">${meta}${articleCount}</p>
+        ${newest.excerpt ? `<p class="story-excerpt">${escapeHtml(newest.excerpt)}</p>` : ''}
       `;
       li.addEventListener('click', () => {
-        map.flyTo({ center: [r.lng, r.lat], zoom: 16 });
+        map.flyTo({ center: [entity.lng, entity.lat], zoom: 16 });
         // Show just the restaurant that was clicked in the list, not every
         // other one that happens to share its location -- the searcher
         // already knows which one they're after.
-        showGroupPopup([r], [r.lng, r.lat]);
+        showGroupPopup([entity], [entity.lng, entity.lat]);
       });
       frag.appendChild(li);
     }
     list.appendChild(frag);
-    if (restaurants.length > toRender.length) {
+    if (entities.length > toRender.length) {
       const note = document.createElement('li');
       note.className = 'story-note';
-      note.textContent = `+ ${restaurants.length - toRender.length} more -- refine your search to narrow the list.`;
+      note.textContent = `+ ${entities.length - toRender.length} more -- refine your search to narrow the list.`;
       list.appendChild(note);
     }
   }
@@ -232,13 +268,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     const q = document.getElementById('search').value.trim().toLowerCase();
     const cuisine = cuisineSelect.value;
 
-    const filtered = allRestaurants.filter((r) => {
-      if (cuisine && r.cuisine !== cuisine) return false;
+    const filtered = allEntities.filter((entity) => {
+      if (cuisine && entity.cuisine !== cuisine) return false;
       if (!q) return true;
       return (
-        (r.name && r.name.toLowerCase().includes(q)) ||
-        (r.cuisine && r.cuisine.toLowerCase().includes(q)) ||
-        (r.address && r.address.toLowerCase().includes(q))
+        (entity.name && entity.name.toLowerCase().includes(q)) ||
+        (entity.cuisine && entity.cuisine.toLowerCase().includes(q)) ||
+        (entity.address && entity.address.toLowerCase().includes(q))
       );
     });
 
