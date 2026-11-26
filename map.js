@@ -4,8 +4,46 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   const CAMBRIDGE_CENTER = [-71.1097, 42.3736];
 
-  const resp = await fetch('data/restaurants.json');
-  const rawRows = await resp.json();
+  const [restaurantsResp, neighborhoodsResp] = await Promise.all([
+    fetch('data/restaurants.json'),
+    fetch('data/neighborhoods.geojson'),
+  ]);
+  const rawRows = await restaurantsResp.json();
+  const neighborhoodFeatures = (await neighborhoodsResp.json()).features;
+
+  // Cambridge's 13 official CDD-designated neighborhoods, from the city's own
+  // open GIS data (public domain): see
+  // https://github.com/cambridgegis/cambridgegis_data/tree/main/Boundary/CDD_Neighborhoods
+  // Point-in-polygon test (ray casting) so every restaurant can be tagged
+  // with which one it falls in -- restaurants outside all 13 (e.g. in
+  // Somerville or Boston, which Cambridge Day also covers) get no neighborhood.
+  function pointInRing(x, y, ring) {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i];
+      const [xj, yj] = ring[j];
+      const intersect = (yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+      if (intersect) inside = !inside;
+    }
+    return inside;
+  }
+
+  function pointInPolygonGeometry(x, y, geometry) {
+    if (geometry.type === 'Polygon') {
+      const [exterior, ...holes] = geometry.coordinates;
+      if (!pointInRing(x, y, exterior)) return false;
+      return !holes.some(hole => pointInRing(x, y, hole));
+    }
+    if (geometry.type === 'MultiPolygon') {
+      return geometry.coordinates.some(poly => pointInPolygonGeometry(x, y, { type: 'Polygon', coordinates: poly }));
+    }
+    return false;
+  }
+
+  function findNeighborhood(lng, lat) {
+    const feature = neighborhoodFeatures.find(f => pointInPolygonGeometry(lng, lat, f.geometry));
+    return feature ? feature.properties.NAME : null;
+  }
 
   // The exported data has one row per (restaurant, article) mention -- the
   // same restaurant can appear many times across different articles written
@@ -35,15 +73,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   const allEntities = buildRestaurantEntities(rawRows);
-  allEntities.forEach((entity, i) => { entity._id = i; });
+  allEntities.forEach((entity, i) => {
+    entity._id = i;
+    entity.neighborhood = findNeighborhood(entity.lng, entity.lat);
+  });
 
-  const cuisineSelect = document.getElementById('cuisine-filter');
-  const cuisines = [...new Set(allEntities.map(r => r.cuisine).filter(Boolean))].sort();
-  for (const c of cuisines) {
+  const neighborhoodSelect = document.getElementById('neighborhood-filter');
+  const neighborhoodNames = [...neighborhoodFeatures.map(f => f.properties.NAME)].sort();
+  for (const n of neighborhoodNames) {
     const opt = document.createElement('option');
-    opt.value = c;
-    opt.textContent = c;
-    cuisineSelect.appendChild(opt);
+    opt.value = n;
+    opt.textContent = n;
+    neighborhoodSelect.appendChild(opt);
   }
 
   // Multiple distinct restaurants often share one exact address (food
@@ -197,6 +238,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       <div class="popup-name">${escapeHtml(entity.name)}</div>
       ${entity.cuisine ? `<div class="popup-cuisine">${escapeHtml(entity.cuisine)}</div>` : ''}
       ${entity.address ? `<div class="popup-address">${escapeHtml(entity.address)}</div>` : ''}
+      ${entity.neighborhood ? `<div class="popup-neighborhood">${escapeHtml(entity.neighborhood)}</div>` : ''}
       ${entity.articles.length > 1 ? `<div class="popup-article-count">${entity.articles.length} articles, newest first</div>` : ''}
       ${articlesHtml}
     `;
@@ -239,7 +281,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       const newest = entity.articles[0];
       const li = document.createElement('li');
       li.dataset.id = entity._id;
-      const meta = [entity.cuisine, newest.date].filter(Boolean).join(' · ');
+      const meta = [entity.cuisine, entity.neighborhood, newest.date].filter(Boolean).join(' · ');
       const articleCount = entity.articles.length > 1 ? ` · ${entity.articles.length} articles` : '';
       li.innerHTML = `
         <p class="story-name">${escapeHtml(entity.name)}</p>
@@ -266,10 +308,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function applyFilters() {
     const q = document.getElementById('search').value.trim().toLowerCase();
-    const cuisine = cuisineSelect.value;
+    const neighborhood = neighborhoodSelect.value;
 
     const filtered = allEntities.filter((entity) => {
-      if (cuisine && entity.cuisine !== cuisine) return false;
+      if (neighborhood && entity.neighborhood !== neighborhood) return false;
       if (!q) return true;
       return (
         (entity.name && entity.name.toLowerCase().includes(q)) ||
@@ -286,7 +328,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   document.getElementById('search').addEventListener('input', debounce(applyFilters, 150));
-  cuisineSelect.addEventListener('change', applyFilters);
+  neighborhoodSelect.addEventListener('change', applyFilters);
 
   function debounce(fn, ms) {
     let t;
