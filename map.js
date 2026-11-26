@@ -350,9 +350,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     const q = document.getElementById('search').value.trim().toLowerCase();
     const neighborhood = neighborhoodSelect.value;
 
+    // A search term always searches every restaurant regardless of the
+    // neighborhood filter -- so searching while zoomed into one neighborhood
+    // still finds a match anywhere else in the city. The neighborhood
+    // filter only narrows things down when the search box is empty.
     const filtered = allEntities.filter((entity) => {
-      if (neighborhood && entity.neighborhood !== neighborhood) return false;
-      if (!q) return true;
+      if (!q) {
+        return !neighborhood || entity.neighborhood === neighborhood;
+      }
       return (
         (entity.name && entity.name.toLowerCase().includes(q)) ||
         (entity.cuisine && entity.cuisine.toLowerCase().includes(q)) ||
